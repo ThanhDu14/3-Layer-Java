@@ -35,3 +35,12 @@ app-test:
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v "$(CURDIR)":/work -v "$(HOME)/.m2":/root/.m2 \
 		-w /work/Java-Login-App $(APP_TEST_IMAGE) mvn -B clean verify
+
+# Local production-shaped stack (nginx -> tomcat 9 -> mysql + redis) on http://localhost:8088
+.PHONY: local-up local-down
+local-up:
+	@test -f Java-Login-App/target/dptweb.war || $(MAKE) app-test
+	docker compose -f local/docker-compose.yml up -d
+
+local-down:
+	docker compose -f local/docker-compose.yml down -v
