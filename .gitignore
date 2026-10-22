@@ -1,0 +1,24 @@
+# Python tooling
+.venv/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+backend.hcl
+
+# Generated secrets (VPN PSKs, WireGuard keys, terraform outputs)
+ansible/.generated/
+
+# Build output
+*.war
+target/
+
+# Molecule
+.molecule/
+
+# Keys
+*.pem
+*.key
