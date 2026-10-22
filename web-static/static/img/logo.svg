@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 48" role="img" aria-label="Java 3-Tier">
+  <rect x="2" y="4" width="36" height="10" rx="2" fill="#3b82f6"/>
+  <rect x="2" y="19" width="36" height="10" rx="2" fill="#10b981"/>
+  <rect x="2" y="34" width="36" height="10" rx="2" fill="#f59e0b"/>
+  <text x="46" y="30" font-family="sans-serif" font-size="14" fill="#1f2933">3-Tier</text>
+</svg>

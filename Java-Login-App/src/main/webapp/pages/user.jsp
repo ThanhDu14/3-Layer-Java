@@ -6,6 +6,7 @@
 <head>
 <meta charset="ISO-8859-1">
 <title>Welcome to iwayQ Technology</title>
+<link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
 Welcome <c:out value="${username}" />
@@ -23,5 +24,6 @@ Welcome <c:out value="${username}" />
 	  <button onclick="window.location.href = 'http://www.iwayq.com/videos/videos.html';"> Poll & Survey  </button>
 	  <button onclick="window.location.href = 'http://www.iwayq.com/videos/videos.html';"> Chat  </button>
 
+<%@ include file="_footer.jspf" %>
 </body>
 </html>

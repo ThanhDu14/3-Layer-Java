@@ -1,0 +1,24 @@
+/* Served by CloudFront from S3 (/static/*), not by Tomcat. */
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 2rem auto;
+  max-width: 40rem;
+  padding: 0 1rem;
+  color: #1f2933;
+  background: #f5f7fa;
+}
+
+table {
+  background: #fff;
+  border-collapse: collapse;
+}
+
+input[type="submit"] {
+  cursor: pointer;
+}
+
+footer#build {
+  margin-top: 2rem;
+  font-size: 0.8rem;
+  color: #616e7c;
+}

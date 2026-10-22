@@ -1,0 +1,1 @@
+<footer id="build">v<span id="app-version">${appVersion}</span> &middot; served by <span id="served-by">${servedBy}</span></footer>
