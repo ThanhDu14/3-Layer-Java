@@ -24,3 +24,14 @@ secrets-check:
 	docker run --rm -v "$(CURDIR)":/repo $(GITLEAKS_IMAGE) detect --no-git --source /repo --redact
 	@! grep -rn "Admin123\|prdevop26" --exclude-dir=.git --exclude-dir=docs --exclude-dir=.superpowers --exclude=Makefile . \
 		|| (echo "known leaked credential found" >&2; exit 1)
+
+# Java tests always run on JDK 11 in Docker (host JDK is newer than Spring Boot 2.7 supports).
+# --network host + docker.sock let Testcontainers start sibling containers.
+APP_TEST_IMAGE := maven:3.9-eclipse-temurin-11
+
+.PHONY: app-test
+app-test:
+	docker run --rm --network host \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v "$(CURDIR)":/work -v "$(HOME)/.m2":/root/.m2 \
+		-w /work/Java-Login-App $(APP_TEST_IMAGE) mvn -B clean verify
