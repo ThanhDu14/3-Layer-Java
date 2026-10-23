@@ -1,0 +1,46 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Render backend from env
+      ansible.builtin.command: /usr/local/bin/render-web-config
+      environment:
+        RENDER_WEB_BACKEND: backend.test
+      changed_when: false
+
+    - name: Read rendered backend
+      ansible.builtin.slurp:
+        src: /etc/nginx/java3tier/backend.conf
+      register: backend_conf
+
+    - name: Backend file is exactly one set line
+      ansible.builtin.assert:
+        that:
+          - (backend_conf.content | b64decode).rstrip('\n') == 'set $app_backend "backend.test";'
+
+    - name: Nginx config is valid
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Render without env or AWS
+      ansible.builtin.command: /usr/local/bin/render-web-config
+      register: render_missing
+      changed_when: false
+      failed_when: false
+
+    - name: Missing parameter fails loudly
+      ansible.builtin.assert:
+        that:
+          - render_missing.rc != 0
+          - "'missing parameter /java3tier/app/internal_nlb_dns' in render_missing.stderr"
+
+    - name: Read systemd drop-in
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/nginx.service.d/java3tier.conf
+      register: dropin
+
+    - name: Drop-in renders before start
+      ansible.builtin.assert:
+        that:
+          - "'ExecStartPre=/usr/local/bin/render-web-config' in (dropin.content | b64decode)"

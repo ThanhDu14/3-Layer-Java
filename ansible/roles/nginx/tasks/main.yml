@@ -1,0 +1,65 @@
+---
+- name: Install nginx and AWS CLI
+  ansible.builtin.dnf:
+    name:
+      - nginx
+      - awscli-2
+    state: present
+
+- name: Create include directory
+  ansible.builtin.file:
+    path: /etc/nginx/java3tier
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install render-web-config
+  ansible.builtin.template:
+    src: render-web-config.j2
+    dest: /usr/local/bin/render-web-config
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install site config
+  ansible.builtin.template:
+    src: java3tier.conf.j2
+    dest: /etc/nginx/conf.d/java3tier.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx
+
+# The stock server block also listens on 80 as default_server.
+- name: Remove stock server block from nginx.conf
+  ansible.builtin.replace:
+    path: /etc/nginx/nginx.conf
+    regexp: '^    server \{\n(?:.*\n)*?    \}\n'
+    replace: ''
+  notify: Restart nginx
+
+- name: Create systemd drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/nginx.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install systemd drop-in
+  ansible.builtin.copy:
+    src: nginx-dropin.conf
+    dest: /etc/systemd/system/nginx.service.d/java3tier.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx
+
+- name: Enable nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    enabled: true
+    daemon_reload: true
+    state: "{{ 'started' if java3tier_services_started else omit }}"
+  when: java3tier_services_enabled

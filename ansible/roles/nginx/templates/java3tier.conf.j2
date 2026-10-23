@@ -1,0 +1,21 @@
+# Managed by Ansible (role nginx)
+server {
+    listen 80 default_server;
+
+    location = /nginx-health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok";
+    }
+
+    location / {
+        # A variable in proxy_pass makes nginx re-resolve the NLB name instead of
+        # pinning the IPs it saw at startup.
+        resolver {{ nginx_resolver }} valid=30s;
+        include /etc/nginx/java3tier/backend.conf;
+        proxy_pass http://$app_backend:{{ nginx_backend_port }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}

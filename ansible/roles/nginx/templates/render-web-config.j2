@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Managed by Ansible (role nginx). Runs as nginx ExecStartPre: writes the
+# internal NLB hostname, read from SSM at boot, into an nginx include.
+set -euo pipefail
+
+param={{ nginx_backend_parameter }}
+out=/etc/nginx/java3tier/backend.conf
+
+if [ -n "${RENDER_WEB_BACKEND:-}" ]; then
+  backend=$RENDER_WEB_BACKEND
+else
+  backend=$(aws ssm get-parameter --name "$param" --query Parameter.Value --output text 2>/dev/null) || backend=
+fi
+
+if [ -z "$backend" ] || [ "$backend" = None ]; then
+  echo "render-web-config: missing parameter $param" >&2
+  exit 1
+fi
+
+tmp=$(mktemp "$out.XXXXXX")
+printf 'set $app_backend "%s";\n' "$backend" > "$tmp"
+chmod 0644 "$tmp"
+mv "$tmp" "$out"

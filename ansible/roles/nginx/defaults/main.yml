@@ -1,0 +1,5 @@
+---
+nginx_backend_parameter: /java3tier/app/internal_nlb_dns
+nginx_backend_port: 8080
+# Route 53 Resolver inside every VPC
+nginx_resolver: 169.254.169.253
