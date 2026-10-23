@@ -17,3 +17,9 @@ variable "github_repo" {
     error_message = "github_repo must look like owner/name."
   }
 }
+
+variable "github_oidc_subject_prefix" {
+  description = "Immutable OIDC subject prefix (repo:<owner>@<id>/<name>@<id>), from gh api repos/<owner>/<name>/actions/oidc/customization/sub"
+  type        = string
+  default     = null
+}

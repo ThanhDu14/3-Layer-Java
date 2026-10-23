@@ -1,3 +1,5 @@
 # Copy to terraform.tfvars (gitignored) and fill in.
 alert_email = "you@example.com"
 github_repo = "ThanhDu14/3-Layer-Java"
+# Only when the repo uses immutable OIDC subjects (sub_claim_prefix from the gh api call in variables.tf).
+# github_oidc_subject_prefix = "repo:ThanhDu14@185515463/3-Layer-Java@1429969372"

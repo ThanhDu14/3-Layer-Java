@@ -1,9 +1,11 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  account_id    = data.aws_caller_identity.current.account_id
-  github_oidc   = "token.actions.githubusercontent.com"
-  artifacts_arn = "arn:aws:s3:::${aws_s3_bucket.artifacts.bucket}"
+  account_id  = data.aws_caller_identity.current.account_id
+  github_oidc = "token.actions.githubusercontent.com"
+  # Both subject formats, so the role keeps working if the repo toggles immutable subjects.
+  github_subject_prefixes = compact(["repo:${var.github_repo}", var.github_oidc_subject_prefix])
+  artifacts_arn           = "arn:aws:s3:::${aws_s3_bucket.artifacts.bucket}"
   # WARs live at dptweb/<version>/dptweb.war
   war_objects = "${local.artifacts_arn}/dptweb/*"
 }
@@ -119,7 +121,7 @@ resource "aws_iam_role" "gha_publisher" {
       Condition = {
         StringEquals = {
           "${local.github_oidc}:aud" = "sts.amazonaws.com"
-          "${local.github_oidc}:sub" = "repo:${var.github_repo}:ref:refs/heads/main"
+          "${local.github_oidc}:sub" = [for prefix in local.github_subject_prefixes : "${prefix}:ref:refs/heads/main"]
         }
       }
     }]

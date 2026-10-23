@@ -60,6 +60,25 @@ run "gha_trust_policy" {
   }
 }
 
+# Repos with immutable OIDC subjects send repo:<owner>@<id>/<name>@<id> instead.
+run "gha_trust_policy_immutable_subject" {
+  command = plan
+
+  variables {
+    github_oidc_subject_prefix = "repo:owner@111/name@222"
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_role.gha_publisher.assume_role_policy, "repo:owner@111/name@222:ref:refs/heads/main")
+    error_message = "GHA role must trust the immutable subject of the main branch"
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_role.gha_publisher.assume_role_policy, "refs/heads/*")
+    error_message = "GHA role must not trust other branches"
+  }
+}
+
 run "artifact_bucket" {
   command = plan
 
