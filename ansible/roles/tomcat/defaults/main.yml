@@ -1,0 +1,10 @@
+---
+tomcat_version: 9.0.123
+tomcat_checksum: sha512:64b1130e719399c0a409e6996081433b16af8d9c89266c7aaa9849af70a1815feca91e13896f5ccc41451dc5759716d1c84882682de955822c30509de102f290
+tomcat_url: https://archive.apache.org/dist/tomcat/tomcat-9/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz
+tomcat_home: /opt/tomcat
+tomcat_user: tomcat
+tomcat_group: tomcat
+tomcat_java_opts: "-Xms256m -Xmx512m"
+# nginx hosts in the web subnets of the app VPC
+tomcat_internal_proxies: '172\.32\.\d+\.\d+'

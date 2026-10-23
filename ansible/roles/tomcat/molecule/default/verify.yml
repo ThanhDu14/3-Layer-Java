@@ -1,0 +1,40 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Tomcat version
+      ansible.builtin.command: /opt/tomcat/bin/version.sh
+      register: tomcat_version_out
+      changed_when: false
+
+    - name: Java version
+      ansible.builtin.command: java -version
+      register: java_version_out
+      changed_when: false
+
+    - name: Default webapps
+      ansible.builtin.find:
+        paths: /opt/tomcat/webapps
+        file_type: any
+      register: webapps
+
+    - name: Read server.xml
+      ansible.builtin.slurp:
+        src: /opt/tomcat/conf/server.xml
+      register: server_xml
+
+    - name: Read unit
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/tomcat.service
+      register: unit
+
+    - name: Tomcat 9 on Java 11, no default apps, behind proxy
+      ansible.builtin.assert:
+        that:
+          - "'Apache Tomcat/9.0.' in tomcat_version_out.stdout"
+          - java_version_out.stderr is search('version "11\.')
+          - webapps.matched == 0
+          - "'RemoteIpValve' in (server_xml.content | b64decode)"
+          - "'EnvironmentFile=-/etc/java3tier/app.env' in (unit.content | b64decode)"
+          - "'Restart=on-failure' in (unit.content | b64decode)"

@@ -1,0 +1,98 @@
+---
+- name: Install Java 11 and archive tools
+  ansible.builtin.dnf:
+    name:
+      - java-11-amazon-corretto-headless
+      - tar
+      - gzip
+      - shadow-utils
+    state: present
+
+- name: Create tomcat group
+  ansible.builtin.group:
+    name: "{{ tomcat_group }}"
+    system: true
+
+- name: Create tomcat user
+  ansible.builtin.user:
+    name: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    home: "{{ tomcat_home }}"
+    create_home: false
+    shell: /sbin/nologin
+    system: true
+
+- name: Download Tomcat
+  ansible.builtin.get_url:
+    url: "{{ tomcat_url }}"
+    dest: "/opt/apache-tomcat-{{ tomcat_version }}.tar.gz"
+    checksum: "{{ tomcat_checksum }}"
+    mode: "0644"
+
+- name: Unpack Tomcat
+  ansible.builtin.unarchive:
+    src: "/opt/apache-tomcat-{{ tomcat_version }}.tar.gz"
+    dest: /opt
+    remote_src: true
+    owner: root
+    group: "{{ tomcat_group }}"
+    creates: "/opt/apache-tomcat-{{ tomcat_version }}/bin/catalina.sh"
+  register: tomcat_unpacked
+
+# Only right after unpacking, so a re-run never removes a deployed ROOT.war.
+# Not a handler: handlers flush at the end of the play, after app_deploy.
+- name: Remove default webapps  # noqa: no-handler
+  ansible.builtin.file:
+    path: "/opt/apache-tomcat-{{ tomcat_version }}/webapps/{{ item }}"
+    state: absent
+  loop: [ROOT, docs, examples, host-manager, manager]
+  when: tomcat_unpacked is changed
+
+- name: Make runtime directories writable by tomcat
+  ansible.builtin.file:
+    path: "/opt/apache-tomcat-{{ tomcat_version }}/{{ item }}"
+    state: directory
+    owner: "{{ tomcat_user }}"
+    group: "{{ tomcat_group }}"
+    mode: "0750"
+  loop: [logs, temp, work, webapps, conf/Catalina]
+
+- name: Link {{ tomcat_home }}
+  ansible.builtin.file:
+    src: "/opt/apache-tomcat-{{ tomcat_version }}"
+    dest: "{{ tomcat_home }}"
+    state: link
+
+- name: Install server.xml
+  ansible.builtin.template:
+    src: server.xml.j2
+    dest: "{{ tomcat_home }}/conf/server.xml"
+    owner: root
+    group: "{{ tomcat_group }}"
+    mode: "0640"
+  notify: Restart tomcat
+
+- name: Create systemd unit directory
+  ansible.builtin.file:
+    path: /etc/systemd/system
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install systemd unit
+  ansible.builtin.template:
+    src: tomcat.service.j2
+    dest: /etc/systemd/system/tomcat.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart tomcat
+
+- name: Enable tomcat
+  ansible.builtin.systemd_service:
+    name: tomcat
+    enabled: true
+    daemon_reload: true
+    state: "{{ 'started' if java3tier_services_started else omit }}"
+  when: java3tier_services_enabled

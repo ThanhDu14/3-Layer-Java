@@ -1,0 +1,21 @@
+# Managed by Ansible (role tomcat)
+[Unit]
+Description=Apache Tomcat {{ tomcat_version }}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ tomcat_user }}
+Group={{ tomcat_group }}
+Environment=CATALINA_HOME={{ tomcat_home }}
+Environment=CATALINA_BASE={{ tomcat_home }}
+Environment="JAVA_OPTS={{ tomcat_java_opts }}"
+EnvironmentFile=-/etc/java3tier/app.env
+ExecStart={{ tomcat_home }}/bin/catalina.sh run
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
