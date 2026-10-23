@@ -56,3 +56,12 @@ molecule:
 
 lint:
 	cd ansible && ansible-lint
+
+# Terraform: plan-only tests with mocked providers in every stack that has tests/
+.PHONY: tf-test
+tf-test:
+	@set -e; for t in $$(find infrastructure -type d -name tests -not -path '*/.terraform/*'); do \
+		d=$$(dirname $$t); echo "== $$d"; \
+		terraform -chdir=$$d init -backend=false -input=false >/dev/null; \
+		terraform -chdir=$$d test; \
+	done
