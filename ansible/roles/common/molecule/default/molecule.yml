@@ -1,0 +1,17 @@
+---
+driver:
+  name: docker
+platforms:
+  - name: common-al2023
+    image: amazonlinux:2023
+  - name: common-ubuntu
+    image: ubuntu:24.04
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        java3tier_services_enabled: false
+        java3tier_services_started: false
+  env:
+    ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/..

@@ -1,0 +1,7 @@
+{# Managed by Ansible (role common) #}
+{% set collect_list = [] %}
+{% for f in common_cw_log_files %}
+{%   set _ = collect_list.append({'file_path': f.path, 'log_group_name': f.log_group, 'log_stream_name': '{instance_id}'}) %}
+{% endfor %}
+{{ {'agent': {'run_as_user': 'root'},
+    'logs': {'logs_collected': {'files': {'collect_list': collect_list}}}} | to_nice_json }}

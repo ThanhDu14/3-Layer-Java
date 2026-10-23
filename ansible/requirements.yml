@@ -1,0 +1,9 @@
+---
+collections:
+  - name: amazon.aws
+  - name: community.aws
+  - name: community.mysql
+  - name: community.general
+  - name: ansible.posix
+  # molecule's docker driver
+  - name: community.docker

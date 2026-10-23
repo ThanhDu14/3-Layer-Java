@@ -1,0 +1,4 @@
+---
+# Files shipped to CloudWatch Logs: list of {path, log_group}
+common_cw_log_files: []
+common_cw_agent_deb_url: https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb

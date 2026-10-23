@@ -1,0 +1,21 @@
+---
+# A real EC2 host already has sshd host keys and /run/sshd; containers do not.
+# Generated here, not in the role, so baked AMIs never share host keys.
+- name: Prepare
+  hosts: all
+  tasks:
+    - name: Install OpenSSH server
+      ansible.builtin.package:
+        name: openssh-server
+        state: present
+        update_cache: true
+
+    - name: Generate host keys
+      ansible.builtin.command: ssh-keygen -A
+      changed_when: true
+
+    - name: Create privilege separation directory
+      ansible.builtin.file:
+        path: /run/sshd
+        state: directory
+        mode: "0755"

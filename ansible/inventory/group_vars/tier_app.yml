@@ -1,0 +1,4 @@
+---
+ansible_ssh_common_args: "-o ProxyJump=ec2-user@{{ groups['tier_bastion'] | first }}"
+common_cw_log_files:
+  - { path: "/opt/tomcat/logs/localhost_access_log.*.txt", log_group: /java3tier/app }

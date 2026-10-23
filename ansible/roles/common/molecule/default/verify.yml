@@ -1,0 +1,28 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Read sshd_config
+      ansible.builtin.slurp:
+        src: /etc/ssh/sshd_config
+      register: sshd_config
+
+    - name: SSH is hardened
+      ansible.builtin.assert:
+        that:
+          - sshd_config.content | b64decode is search('(?m)^PasswordAuthentication no$')
+          - sshd_config.content | b64decode is search('(?m)^PermitRootLogin no$')
+
+    - name: Read CloudWatch agent config
+      ansible.builtin.slurp:
+        src: /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+      register: cw_config
+
+    - name: Agent config collects the requested log files
+      vars:
+        collect_list: "{{ (cw_config.content | b64decode | from_json).logs.logs_collected.files.collect_list }}"
+      ansible.builtin.assert:
+        that:
+          - collect_list | map(attribute='file_path') | list == ['/var/log/test.log']
+          - collect_list | map(attribute='log_group_name') | list == ['/java3tier/test']

@@ -44,3 +44,15 @@ local-up:
 
 local-down:
 	docker compose -f local/docker-compose.yml down -v
+
+# Ansible: collections, molecule per role, lint
+.PHONY: collections molecule lint
+collections:
+	$(VENV)/bin/ansible-galaxy collection install -r ansible/requirements.yml
+
+molecule:
+	@test -n "$(ROLE)" || (echo "usage: make molecule ROLE=<role>" >&2; exit 1)
+	cd ansible/roles/$(ROLE) && molecule test
+
+lint:
+	cd ansible && ansible-lint

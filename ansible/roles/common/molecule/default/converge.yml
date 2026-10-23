@@ -1,0 +1,9 @@
+---
+- name: Converge
+  hosts: all
+  vars:
+    common_cw_log_files:
+      - path: /var/log/test.log
+        log_group: /java3tier/test
+  roles:
+    - role: common

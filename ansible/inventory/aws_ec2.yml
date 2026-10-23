@@ -1,0 +1,15 @@
+---
+plugin: amazon.aws.aws_ec2
+regions:
+  - us-east-1
+filters:
+  tag:Project: java3tier
+  instance-state-name: running
+keyed_groups:
+  - key: tags.Tier
+    prefix: tier
+hostnames:
+  - private-ip-address
+compose:
+  # The CGW is reached over its Elastic IP; everything else through the bastion.
+  ansible_host: "public_ip_address if tags.Tier == 'cgw' else private_ip_address"

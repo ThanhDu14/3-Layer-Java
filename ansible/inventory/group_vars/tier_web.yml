@@ -1,0 +1,5 @@
+---
+ansible_ssh_common_args: "-o ProxyJump=ec2-user@{{ groups['tier_bastion'] | first }}"
+common_cw_log_files:
+  - { path: /var/log/nginx/access.log, log_group: /java3tier/web }
+  - { path: /var/log/nginx/error.log, log_group: /java3tier/web }
