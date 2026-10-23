@@ -60,16 +60,50 @@ run "gha_trust_policy" {
   }
 }
 
-run "codeartifact_repository" {
+run "artifact_bucket" {
   command = plan
 
   assert {
-    condition     = aws_codeartifact_repository.maven_releases.repository == "maven-releases"
-    error_message = "repository must be maven-releases"
+    condition     = aws_s3_bucket.artifacts.bucket == "java3tier-artifacts-111122223333"
+    error_message = "artifact bucket must be java3tier-artifacts-<account_id>"
   }
 
   assert {
-    condition     = aws_codeartifact_repository.maven_releases.domain == "java3tier"
-    error_message = "repository must belong to domain java3tier"
+    condition = alltrue([
+      aws_s3_bucket_public_access_block.artifacts.block_public_acls,
+      aws_s3_bucket_public_access_block.artifacts.block_public_policy,
+      aws_s3_bucket_public_access_block.artifacts.ignore_public_acls,
+      aws_s3_bucket_public_access_block.artifacts.restrict_public_buckets,
+    ])
+    error_message = "all four public access block flags must be true"
+  }
+}
+
+run "gha_publishes_war_to_s3" {
+  command = plan
+
+  assert {
+    condition = contains(
+      [for s in jsondecode(aws_iam_role_policy.gha_publisher.policy).Statement : s.Resource if contains(flatten([s.Action]), "s3:PutObject")],
+      "arn:aws:s3:::java3tier-artifacts-111122223333/dptweb/*"
+    )
+    error_message = "GHA role may only write WARs under dptweb/ in the artifact bucket"
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_role_policy.gha_publisher.policy, "codeartifact")
+    error_message = "CodeArtifact is not available on the AWS Free plan"
+  }
+}
+
+run "packer_reads_war_from_s3" {
+  command = plan
+
+  assert {
+    condition = contains(
+      flatten([for s in jsondecode(aws_iam_role_policy.packer.policy).Statement : s.Resource if contains(flatten([s.Action]), "s3:GetObject")]),
+      "arn:aws:s3:::java3tier-artifacts-111122223333/dptweb/*"
+    )
+    error_message = "Packer instances must be able to read WARs under dptweb/"
   }
 }

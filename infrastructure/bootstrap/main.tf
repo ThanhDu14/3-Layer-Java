@@ -1,9 +1,11 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  account_id   = data.aws_caller_identity.current.account_id
-  github_oidc  = "token.actions.githubusercontent.com"
-  package_arns = "arn:aws:codeartifact:${var.aws_region}:${local.account_id}:package/${aws_codeartifact_domain.this.domain}/${aws_codeartifact_repository.maven_releases.repository}/*"
+  account_id    = data.aws_caller_identity.current.account_id
+  github_oidc   = "token.actions.githubusercontent.com"
+  artifacts_arn = "arn:aws:s3:::${aws_s3_bucket.artifacts.bucket}"
+  # WARs live at dptweb/<version>/dptweb.war
+  war_objects = "${local.artifacts_arn}/dptweb/*"
 }
 
 # --- Terraform state for live/ (S3 native locking, use_lockfile) ---
@@ -73,15 +75,29 @@ resource "aws_sns_topic_subscription" "alerts_email" {
   endpoint  = var.alert_email
 }
 
-# --- Maven repository for the WAR ---
+# --- WAR artifacts (CodeArtifact is not available on the AWS Free plan) ---
 
-resource "aws_codeartifact_domain" "this" {
-  domain = "java3tier"
+resource "aws_s3_bucket" "artifacts" {
+  bucket = "java3tier-artifacts-${local.account_id}"
 }
 
-resource "aws_codeartifact_repository" "maven_releases" {
-  repository = "maven-releases"
-  domain     = aws_codeartifact_domain.this.domain
+resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
+  bucket = aws_s3_bucket.artifacts.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "artifacts" {
+  bucket = aws_s3_bucket.artifacts.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # --- GitHub Actions publisher (OIDC, no stored keys) ---
@@ -111,38 +127,20 @@ resource "aws_iam_role" "gha_publisher" {
 }
 
 resource "aws_iam_role_policy" "gha_publisher" {
-  name = "codeartifact-publish"
+  name = "publish-war"
   role = aws_iam_role.gha_publisher.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["codeartifact:GetAuthorizationToken"]
-        Resource = aws_codeartifact_domain.this.arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["codeartifact:GetRepositoryEndpoint", "codeartifact:ReadFromRepository"]
-        Resource = aws_codeartifact_repository.maven_releases.arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["codeartifact:PublishPackageVersion", "codeartifact:PutPackageMetadata", "codeartifact:ReadFromRepository"]
-        Resource = local.package_arns
-      },
-      {
-        Effect    = "Allow"
-        Action    = "sts:GetServiceBearerToken"
-        Resource  = "*"
-        Condition = { StringEquals = { "sts:AWSServiceName" = "codeartifact.amazonaws.com" } }
-      },
-    ]
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "s3:PutObject"
+      Resource = local.war_objects
+    }]
   })
 }
 
-# --- Packer build instances: pull the WAR from CodeArtifact ---
+# --- Packer build instances: pull the WAR from S3 ---
 
 resource "aws_iam_role" "packer" {
   name = "java3tier-packer"
@@ -158,7 +156,7 @@ resource "aws_iam_role" "packer" {
 }
 
 resource "aws_iam_role_policy" "packer" {
-  name = "codeartifact-read"
+  name = "read-war"
   role = aws_iam_role.packer.id
 
   policy = jsonencode({
@@ -166,19 +164,15 @@ resource "aws_iam_role_policy" "packer" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["codeartifact:GetAuthorizationToken"]
-        Resource = aws_codeartifact_domain.this.arn
+        Action   = "s3:GetObject"
+        Resource = local.war_objects
       },
       {
-        Effect   = "Allow"
-        Action   = ["codeartifact:GetRepositoryEndpoint", "codeartifact:ReadFromRepository"]
-        Resource = [aws_codeartifact_repository.maven_releases.arn, local.package_arns]
-      },
-      {
+        # Without ListBucket a missing version answers 403 instead of 404.
         Effect    = "Allow"
-        Action    = "sts:GetServiceBearerToken"
-        Resource  = "*"
-        Condition = { StringEquals = { "sts:AWSServiceName" = "codeartifact.amazonaws.com" } }
+        Action    = "s3:ListBucket"
+        Resource  = local.artifacts_arn
+        Condition = { StringLike = { "s3:prefix" = "dptweb/*" } }
       },
     ]
   })

@@ -198,8 +198,10 @@ Theo sơ đồ là **NLB** ở cả hai tầng. Code hiện tại dùng ALB, nê
 ## 8. CI và kho artifact **[Đã chốt]**
 
 - **GitHub Actions**: khi push lên `main` thì `mvn test`, `mvn package`, rồi publish `.war` có version.
-- **AWS CodeArtifact** làm Maven repo (thay JFrog trong sơ đồ). Xác thực bằng IAM; GitHub Actions
-  dùng OIDC role, không lưu access key.
+- **S3 bucket** `java3tier-artifacts-<account_id>` chứa `.war` theo version (thay JFrog trong sơ đồ).
+  Xác thực bằng IAM; GitHub Actions dùng OIDC role, không lưu access key. (Ban đầu chọn
+  CodeArtifact; đổi sang S3 ngày 2026-10-23 vì tài khoản ở gói AWS Free không dùng được
+  CodeArtifact và chủ project không nâng lên gói trả phí.)
 - **SonarCloud** quét code (thay SonarQube trong sơ đồ). Gói free yêu cầu **repo public**.
   Chủ project tự tạo repo GitHub; mặc định là public. **[Claude chọn]**
 - Tách khỏi pipeline: bake AMI và deploy chạy từ laptop (vì cần VPN).
@@ -237,7 +239,7 @@ Theo sơ đồ là **NLB** ở cả hai tầng. Code hiện tại dùng ALB, nê
 ## 10. Vòng đời và tổ chức code
 
 - Terraform tách thành ít nhất 2 phần, để `destroy` không xóa nhầm thứ cần giữ:
-  - `bootstrap/`: S3 bucket cho state, DynamoDB lock, AWS Budget, CodeArtifact repo, IAM OIDC cho GitHub. Giữ lâu dài, chi phí gần 0.
+  - `bootstrap/`: S3 bucket cho state, DynamoDB lock, AWS Budget, S3 bucket chứa WAR, IAM OIDC cho GitHub. Giữ lâu dài, chi phí gần 0.
   - `live/`: toàn bộ mạng, VPN, ASG, RDS… Dựng lên rồi destroy.
 - Dùng lại các module hiện có trong `infrastructure/modules` khi được. Thêm module
   `tgw`, `vpn`, `office`, `nlb`. Bỏ module `alb`.
@@ -266,5 +268,5 @@ Theo sơ đồ là **NLB** ở cả hai tầng. Code hiện tại dùng ALB, nê
 
 ## 13. Câu hỏi còn mở
 
-Không còn. Đã chốt ngày 2026-10-22: CI = GitHub Actions + CodeArtifact + SonarCloud;
+Không còn. Đã chốt ngày 2026-10-22: CI = GitHub Actions + SonarCloud, WAR lưu trên S3 (đổi từ CodeArtifact ngày 2026-10-23);
 có làm ElastiCache và CloudFront; chủ project tự tạo repo GitHub.

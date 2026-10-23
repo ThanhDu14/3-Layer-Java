@@ -1,0 +1,8 @@
+# Default rules, minus git-ignored scratch: plan workspaces keep raw test logs in which
+# Spring prints a random per-run "generated security password".
+[extend]
+useDefault = true
+
+[allowlist]
+description = "git-ignored local workspaces"
+paths = ['''(^|/)\.superpowers/''']

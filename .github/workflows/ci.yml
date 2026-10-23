@@ -55,9 +55,7 @@ jobs:
       id-token: write
       contents: read
     env:
-      CA_ARGS: >-
-        --domain ${{ vars.CODEARTIFACT_DOMAIN }}
-        --domain-owner ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
+      VERSION: 1.0.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -72,25 +70,13 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      - name: CodeArtifact token and endpoint
-        id: ca
-        run: |
-          # shellcheck disable=SC2086
-          token=$(aws codeartifact get-authorization-token $CA_ARGS --query authorizationToken --output text)
-          echo "::add-mask::$token"
-          echo "CODEARTIFACT_AUTH_TOKEN=$token" >> "$GITHUB_ENV"
-          # shellcheck disable=SC2086
-          endpoint=$(aws codeartifact get-repository-endpoint $CA_ARGS \
-            --repository ${{ vars.CODEARTIFACT_REPO }} --format maven \
-            --query repositoryEndpoint --output text)
-          echo "endpoint=$endpoint" >> "$GITHUB_OUTPUT"
-
       - name: Set version
         run: >-
           mvn -B org.codehaus.mojo:versions-maven-plugin:2.18.0:set
-          -DnewVersion=1.0.${{ github.run_number }} -DgenerateBackupPoms=false
+          -DnewVersion="$VERSION" -DgenerateBackupPoms=false
 
-      - name: Publish WAR
-        run: >-
-          mvn -B -s ci-settings.xml deploy -DskipTests
-          -DaltDeploymentRepository=codeartifact::default::${{ steps.ca.outputs.endpoint }}
+      - name: Build WAR
+        run: mvn -B package -DskipTests
+
+      - name: Publish WAR to S3
+        run: aws s3 cp target/dptweb.war "s3://${{ vars.ARTIFACT_BUCKET }}/dptweb/$VERSION/dptweb.war"

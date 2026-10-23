@@ -2,16 +2,8 @@ output "state_bucket" {
   value = aws_s3_bucket.state.bucket
 }
 
-output "codeartifact_domain" {
-  value = aws_codeartifact_domain.this.domain
-}
-
-output "codeartifact_domain_owner" {
-  value = aws_codeartifact_domain.this.owner
-}
-
-output "codeartifact_repository" {
-  value = aws_codeartifact_repository.maven_releases.repository
+output "artifact_bucket" {
+  value = aws_s3_bucket.artifacts.bucket
 }
 
 output "gha_role_arn" {

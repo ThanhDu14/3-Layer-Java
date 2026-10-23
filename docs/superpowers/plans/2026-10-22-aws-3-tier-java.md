@@ -4,9 +4,9 @@
 
 **Goal:** Dựng lại DevOps-Project-01 thành một hệ thống 3 lớp chạy thật trên AWS: văn phòng giả lập → Site-to-Site VPN → Transit Gateway → bastion; CloudFront → NLB → Nginx → NLB nội bộ → Tomcat → RDS + ElastiCache. Toàn bộ dựng/xóa bằng `make up` / `make down`.
 
-**Architecture:** Terraform chia 2 stack: `bootstrap/` (giữ lâu dài: state, Budget, CodeArtifact, OIDC, SNS, Packer profile) và `live/` (dựng rồi xóa). Ansible roles là nguồn cấu hình duy nhất; Packer dùng chúng để bake AMI web/app, systemd `ExecStartPre` render cấu hình runtime từ SSM Parameter Store lúc boot. Dynamic inventory `aws_ec2` + bastion ProxyJump qua WireGuard → IPsec dùng cho vận hành và rolling deploy.
+**Architecture:** Terraform chia 2 stack: `bootstrap/` (giữ lâu dài: state, Budget, S3 chứa WAR, OIDC, SNS, Packer profile) và `live/` (dựng rồi xóa). Ansible roles là nguồn cấu hình duy nhất; Packer dùng chúng để bake AMI web/app, systemd `ExecStartPre` render cấu hình runtime từ SSM Parameter Store lúc boot. Dynamic inventory `aws_ec2` + bastion ProxyJump qua WireGuard → IPsec dùng cho vận hành và rolling deploy.
 
-**Tech Stack:** Java 11 / Spring Boot 2.7.18 (WAR, JSP) · Tomcat 9 · Nginx · MySQL 8 (RDS) · Redis 7 (ElastiCache) + Spring Session · Terraform ≥ 1.10 + `hashicorp/aws ~> 6.0` · Packer + `amazon` plugin · Ansible core ≥ 2.17 + Molecule (docker) · strongSwan (swanctl) · WireGuard · GitHub Actions · AWS CodeArtifact · SonarCloud.
+**Tech Stack:** Java 11 / Spring Boot 2.7.18 (WAR, JSP) · Tomcat 9 · Nginx · MySQL 8 (RDS) · Redis 7 (ElastiCache) + Spring Session · Terraform ≥ 1.10 + `hashicorp/aws ~> 6.0` · Packer + `amazon` plugin · Ansible core ≥ 2.17 + Molecule (docker) · strongSwan (swanctl) · WireGuard · GitHub Actions · S3 (chứa WAR) · SonarCloud.
 
 **Spec:** `docs/superpowers/specs/2026-10-22-aws-3-tier-java-design.md`
 
@@ -19,7 +19,7 @@
 - Kích cỡ: EC2 `t3.micro`; RDS `db.t3.micro` MySQL 8.0 Multi-AZ; ElastiCache `cache.t3.micro` × 2, Redis 7.1. ASG web và app: min 2 / max 4 / desired 2, target tracking CPU 60%.
 - Base AMI: Amazon Linux 2023 (`/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64`) cho web/app/bastion; Ubuntu 24.04 (`/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id`) cho CGW.
 - SSM parameter (chính xác): `/java3tier/db/host`, `/java3tier/db/name`=`UserDB`, `/java3tier/db/master_username`=`admin`, `/java3tier/db/master_password` (SecureString), `/java3tier/db/app_username`=`appuser`, `/java3tier/db/app_password` (SecureString), `/java3tier/redis/host`, `/java3tier/redis/auth_token` (SecureString), `/java3tier/app/internal_nlb_dns`, `/java3tier/app/version`.
-- Maven coordinates: `com.devopsrealtime:dptweb:<version>:war`; CodeArtifact domain `java3tier`, repository `maven-releases`; CI version `1.0.${{ github.run_number }}`.
+- WAR artifact: `s3://java3tier-artifacts-<account_id>/dptweb/<version>/dptweb.war` (CodeArtifact không dùng được trên gói AWS Free — đổi ngày 2026-10-23); CI version `1.0.${{ github.run_number }}`.
 - Không secret nào trong git (gitleaks phải sạch). Mọi file sinh ra chứa secret nằm dưới `ansible/.generated/` (gitignored).
 - Không security group nào cho port 22 từ `0.0.0.0/0`. SSH vào VPC ứng dụng chỉ từ `192.168.1.0/24` (bastion). Văn phòng/WireGuard không có route trực tiếp tới `172.32.0.0/16`.
 - AWS Budget $100/tháng, cảnh báo email ở 20%/50%/100% — nằm trong `bootstrap/`, không bao giờ bị `make down` xóa.
@@ -202,38 +202,37 @@ Xóa: `Java-Login-App/settings.xml`, `infrastructure/main.tf`, `infrastructure/v
 **Interfaces:**
 - Variables: `aws_region` (default `us-east-1`), `alert_email` (string), `github_repo` (`"owner/name"`).
 - State của bootstrap: **local** (`infrastructure/bootstrap/terraform.tfstate`, gitignored).
-- Resources: S3 `java3tier-tfstate-<account_id>` (versioning, SSE-S3, block public access đủ 4 cờ); `aws_budgets_budget` COST $100/tháng, 3 notification ACTUAL 20/50/100 % tới `alert_email`; CodeArtifact domain `java3tier` + repository `maven-releases`; OIDC provider `token.actions.githubusercontent.com`; IAM role `java3tier-gha-publisher` (trust `repo:<github_repo>:ref:refs/heads/main`, quyền `codeartifact:GetAuthorizationToken/GetRepositoryEndpoint/PublishPackageVersion/PutPackageMetadata/ReadFromRepository` + `sts:GetServiceBearerToken`); SNS topic `java3tier-alerts` + subscription email; IAM instance profile `java3tier-packer` (CodeArtifact read + `sts:GetServiceBearerToken`).
-- Outputs: `state_bucket`, `codeartifact_domain`, `codeartifact_domain_owner`, `codeartifact_repository`, `gha_role_arn`, `alerts_topic_arn`, `packer_instance_profile`.
+- Resources: S3 `java3tier-tfstate-<account_id>` (versioning, SSE-S3, block public access đủ 4 cờ); `aws_budgets_budget` COST $100/tháng, 3 notification ACTUAL 20/50/100 % tới `alert_email`; S3 `java3tier-artifacts-<account_id>` (SSE-S3, block public access đủ 4 cờ); OIDC provider `token.actions.githubusercontent.com`; IAM role `java3tier-gha-publisher` (trust `repo:<github_repo>:ref:refs/heads/main`, quyền `s3:PutObject` chỉ trên `dptweb/*` của bucket artifacts); SNS topic `java3tier-alerts` + subscription email; IAM instance profile `java3tier-packer` (`s3:GetObject` trên `dptweb/*` + `s3:ListBucket` prefix `dptweb/`).
+- Outputs: `state_bucket`, `artifact_bucket`, `gha_role_arn`, `alerts_topic_arn`, `packer_instance_profile`.
 
 - [ ] **Step 1: Viết `tests/bootstrap.tftest.hcl`** với các assert:
   - tên bucket == `"java3tier-tfstate-111122223333"`
   - public access block: cả 4 cờ `true`
   - tập threshold của budget == `[20, 50, 100]`
   - trust policy của role GHA chứa `repo:owner/name:ref:refs/heads/main` (đặt `github_repo = "owner/name"` trong `variables {}`)
-  - repository CodeArtifact tên `maven-releases` thuộc domain `java3tier`
+  - bucket artifacts == `"java3tier-artifacts-111122223333"`, đủ 4 cờ public access block; policy GHA có `s3:PutObject` trên `.../dptweb/*` và không chứa `codeartifact`; policy Packer có `s3:GetObject` trên `.../dptweb/*`
 - [ ] **Step 2: `make tf-test`** → Expected: FAIL (chưa có resource).
 - [ ] **Step 3: Implement** bootstrap.
 - [ ] **Step 4: `make tf-test`** → PASS.
-- [ ] **Step 5: Apply thật**: `terraform -chdir=infrastructure/bootstrap apply` → bấm xác nhận email SNS và email Budget. Kiểm tra: `aws codeartifact describe-repository --domain java3tier --repository maven-releases` thành công.
+- [ ] **Step 5: Apply thật**: `terraform -chdir=infrastructure/bootstrap apply` → bấm xác nhận email SNS và email Budget. Kiểm tra: `aws s3api head-bucket --bucket $(terraform -chdir=infrastructure/bootstrap output -raw artifact_bucket)` thành công.
 - [ ] **Step 6: Commit** `feat(infra): bootstrap stack (state, budget, codeartifact, oidc, alerts)`
 
-### Task 6: GitHub Actions CI → SonarCloud → CodeArtifact
+### Task 6: GitHub Actions CI → SonarCloud → S3
 
-**Files:** Create `.github/workflows/ci.yml`, `Java-Login-App/ci-settings.xml`
+**Files:** Create `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Repo variables (đặt bằng `gh variable set`): `AWS_ROLE_ARN`, `CODEARTIFACT_DOMAIN`, `CODEARTIFACT_DOMAIN_OWNER`, `CODEARTIFACT_REPO`, `SONAR_ORG`, `SONAR_PROJECT_KEY`; secret: `SONAR_TOKEN`.
-- `ci-settings.xml`: server id `codeartifact`, username `aws`, password `${env.CODEARTIFACT_AUTH_TOKEN}`.
+- Repo variables (đặt bằng `gh variable set`): `AWS_ROLE_ARN`, `ARTIFACT_BUCKET`, `SONAR_ORG`, `SONAR_PROJECT_KEY`; secret: `SONAR_TOKEN`.
 - Job `test` (mọi push/PR): `actions/setup-java` temurin 11 + cache maven → `mvn -B verify` → nếu có `SONAR_TOKEN`: `mvn -B sonar:sonar -Dsonar.organization=$SONAR_ORG -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.host.url=https://sonarcloud.io`.
-- Job `publish` (`needs: test`, chỉ `push` vào `main`, `permissions: id-token: write, contents: read`): `aws-actions/configure-aws-credentials` (role `AWS_ROLE_ARN`) → lấy token CodeArtifact → `mvn -B versions:set -DnewVersion=1.0.${{ github.run_number }}` → `mvn -B -s ci-settings.xml deploy -DskipTests -DaltDeploymentRepository=codeartifact::default::<endpoint>`.
+- Job `publish` (`needs: test`, chỉ `push` vào `main`, `permissions: id-token: write, contents: read`): `aws-actions/configure-aws-credentials` (role `AWS_ROLE_ARN`) → `mvn -B versions:set -DnewVersion=1.0.${{ github.run_number }}` → `mvn -B package -DskipTests` → `aws s3 cp target/dptweb.war s3://$ARTIFACT_BUCKET/dptweb/<version>/dptweb.war`.
 
 - [ ] **Step 1: Lint workflow**: `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest` → Expected: không lỗi.
 - [ ] **Step 2: Tạo project trên SonarCloud** (import repo GitHub), đặt variables/secret bằng `gh`.
 - [ ] **Step 3: Push, theo dõi**: `gh run watch` → Expected: `test` và `publish` xanh.
 - [ ] **Step 4: Xác minh artifact**:
-  `aws codeartifact list-package-versions --domain java3tier --repository maven-releases --format maven --namespace com.devopsrealtime --package dptweb`
-  Expected: có version `1.0.<run_number>`.
-- [ ] **Step 5: Commit** `ci: build, sonarcloud scan, publish war to codeartifact`
+  `aws s3 ls s3://<artifact_bucket>/dptweb/`
+  Expected: có prefix `1.0.<run_number>/`.
+- [ ] **Step 5: Commit** `ci: build, sonarcloud scan, publish war to s3`
 
 ---
 
@@ -294,8 +293,8 @@ Xóa: `Java-Login-App/settings.xml`, `infrastructure/main.tf`, `infrastructure/v
 **Files:** Create `ansible/roles/app_deploy/…`, `molecule/default/*` (molecule `dependency` gồm role `tomcat`)
 
 **Interfaces:**
-- Vars: `app_version` (bắt buộc), `app_codeartifact_domain`, `app_codeartifact_domain_owner`, `app_codeartifact_repository`, `app_war_src` (mặc định rỗng; nếu đặt thì copy file local thay vì tải CodeArtifact — dùng cho molecule).
-- Tải WAR trên máy đích bằng `aws codeartifact get-package-version-asset --format maven --namespace com.devopsrealtime --package dptweb --package-version {{ app_version }} --asset dptweb-{{ app_version }}.war <dest>` → cài thành `/opt/tomcat/webapps/ROOT.war` (xóa thư mục `ROOT/` cũ), ghi `/etc/java3tier/app-version` = `app_version`; restart tomcat chỉ khi `java3tier_services_started`.
+- Vars: `app_version` (bắt buộc), `app_artifact_bucket`, `app_war_src` (mặc định rỗng; nếu đặt thì copy file local thay vì tải từ S3 — dùng cho molecule).
+- Tải WAR trên máy đích bằng `aws s3 cp s3://{{ app_artifact_bucket }}/dptweb/{{ app_version }}/dptweb.war <dest>` → cài thành `/opt/tomcat/webapps/ROOT.war` (xóa thư mục `ROOT/` cũ), ghi `/etc/java3tier/app-version` = `app_version`; restart tomcat chỉ khi `java3tier_services_started`.
 - `/usr/local/bin/render-app-config`: đọc các parameter `/java3tier/db/*`, `/java3tier/redis/*` (SecureString có decrypt) — hoặc từ env `RENDER_APP_FROM_ENV=1` cho test — ghi `/etc/java3tier/app.env` (owner `tomcat`, mode `0600`) với đúng các key:
   `SPRING_DATASOURCE_URL=jdbc:mysql://<db_host>:3306/UserDB?sslMode=REQUIRED`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_REDIS_HOST`, `SPRING_REDIS_PORT=6379`, `SPRING_REDIS_PASSWORD`, `SPRING_REDIS_SSL=true`. Thiếu parameter → exit ≠ 0, stderr `missing parameter <tên>`.
 - Drop-in `/etc/systemd/system/tomcat.service.d/java3tier.conf`: `ExecStartPre=+/usr/local/bin/render-app-config`.
@@ -343,7 +342,7 @@ Xóa: `Java-Login-App/settings.xml`, `infrastructure/main.tf`, `infrastructure/v
 **Files:** Create `packer/{java3tier.pkr.hcl,variables.pkr.hcl}`, `ansible/playbooks/{packer-web.yml,packer-app.yml}`, `scripts/prune-amis.sh`; Modify `Makefile` (`ami`, `ami-web`, `ami-app`)
 
 **Interfaces:**
-- Variables: `app_version` (bắt buộc cho app), `instance_profile` (= output `packer_instance_profile`), `codeartifact_domain_owner`.
+- Variables: `app_version` (bắt buộc cho app), `instance_profile` (= output `packer_instance_profile`), `artifact_bucket`.
 - 2 source `amazon-ebs.web` / `amazon-ebs.app`: base AL2023 qua `data "amazon-parameterstore"`, `t3.micro`, default VPC, `ssh_username = "ec2-user"`, `iam_instance_profile`, `ami_name = "java3tier-<role>-{{timestamp}}"`, tags `Project=java3tier`, `Role=<role>`, `AppVersion=<app_version|n/a>`.
 - Provisioner `ansible` chạy `packer-<role>.yml` với `java3tier_services_enabled=true java3tier_services_started=false`.
   - `packer-web.yml`: `common` + `nginx`; `packer-app.yml`: `common` + `tomcat` + `app_deploy`.
@@ -431,7 +430,7 @@ Xóa: `Java-Login-App/settings.xml`, `infrastructure/main.tf`, `infrastructure/v
 
 **Interfaces:**
 - `nlb` vars: `name`, `internal` (bool), `subnet_ids`, `security_group_ids`, `port`, `health_check_path`, `deregistration_delay` (30). Health check HTTP, interval 10, healthy/unhealthy threshold 2. Outputs: `dns_name`, `arn_suffix`, `target_group_arn`, `target_group_arn_suffix`.
-- `asg` vars: `name`, `tier` (`web`|`app`), `subnet_ids`, `security_group_ids`, `target_group_arns`, `key_name`, `instance_type` (`t3.micro`), `min_size` 2, `max_size` 4, `desired_capacity` 2, `cpu_target` 60, `ssm_parameter_paths` (list ARN path), `allow_codeartifact_read` (bool), `log_group_names` (list). AMI: `data "aws_ami"` `most_recent`, `owners = ["self"]`, filter `tag:Project=java3tier`, `tag:Role=<tier>`. Launch template IMDSv2 (`http_tokens = "required"`), không cần user_data; instance profile riêng (SSM read theo path, `CloudWatchAgentServerPolicy`, CodeArtifact read khi bật). `health_check_type = "ELB"`, grace 180; tag propagate `Project`, `Tier`, `Name`. Outputs: `asg_name`, `launch_template_id`.
+- `asg` vars: `name`, `tier` (`web`|`app`), `subnet_ids`, `security_group_ids`, `target_group_arns`, `key_name`, `instance_type` (`t3.micro`), `min_size` 2, `max_size` 4, `desired_capacity` 2, `cpu_target` 60, `ssm_parameter_paths` (list ARN path), `allow_artifact_read` (bool), `log_group_names` (list). AMI: `data "aws_ami"` `most_recent`, `owners = ["self"]`, filter `tag:Project=java3tier`, `tag:Role=<tier>`. Launch template IMDSv2 (`http_tokens = "required"`), không cần user_data; instance profile riêng (SSM read theo path, `CloudWatchAgentServerPolicy`, `s3:GetObject` trên `dptweb/*` của bucket artifacts khi bật). `health_check_type = "ELB"`, grace 180; tag propagate `Project`, `Tier`, `Name`. Outputs: `asg_name`, `launch_template_id`.
 
 - [ ] **Step 1: Tests**: `nlb` internal → `internal == true`, health path `/actuator/health/lb`, `deregistration_delay == "30"`; `asg` → min/max/desired 2/4/2, `http_tokens == "required"`, target tracking `target_value == 60`, filter AMI có `tag:Role` = `web`.
 - [ ] **Step 2: FAIL → Step 3: Implement → Step 4: PASS.**
@@ -470,7 +469,7 @@ Xóa: `Java-Login-App/settings.xml`, `infrastructure/main.tf`, `infrastructure/v
 - Backend: `backend "s3" {}` partial; `backend.hcl` = `bucket = <state_bucket>`, `key = "live/terraform.tfstate"`, `region = "us-east-1"`, `use_lockfile = true`.
 - Đọc bootstrap bằng `data "terraform_remote_state" "bootstrap" { backend = "local", config = { path = "../bootstrap/terraform.tfstate" } }`.
 - Variables: `admin_cidr`, `ssh_public_key` (nội dung `~/.ssh/java3tier_ed25519.pub`).
-- Wiring: 3 VPC (`vpc` module ×2 + `office`), `tgw`, `vpn`, `bastion`, `security`, `nlb` ×2 (public NLB ở public subnets, port 80 → TG web; internal NLB ở app subnets, port 8080 → TG app), `asg` ×2 (web: `ssm_parameter_paths = ["/java3tier/app/*"]`; app: `["/java3tier/db/*","/java3tier/redis/*"]`, `allow_codeartifact_read = true`), `rds`, `elasticache`, `params`, `cloudfront`, `monitoring`. VPC routes vào TGW: RT public của mgmt → `10.10.0.0/16`, `10.99.0.0/24`, `172.32.0.0/16`; RT private của app → `192.168.0.0/16`. Cả hai ASG `depends_on = [module.params]` (máy boot lần đầu là đọc được parameter).
+- Wiring: 3 VPC (`vpc` module ×2 + `office`), `tgw`, `vpn`, `bastion`, `security`, `nlb` ×2 (public NLB ở public subnets, port 80 → TG web; internal NLB ở app subnets, port 8080 → TG app), `asg` ×2 (web: `ssm_parameter_paths = ["/java3tier/app/*"]`; app: `["/java3tier/db/*","/java3tier/redis/*"]`, `allow_artifact_read = true`), `rds`, `elasticache`, `params`, `cloudfront`, `monitoring`. VPC routes vào TGW: RT public của mgmt → `10.10.0.0/16`, `10.99.0.0/24`, `172.32.0.0/16`; RT private của app → `192.168.0.0/16`. Cả hai ASG `depends_on = [module.params]` (máy boot lần đầu là đọc được parameter).
 - Outputs (Task 22 dùng): `cloudfront_domain`, `static_bucket`, `cgw_public_ip`, `bastion_private_ip`, `vpn_tunnels` (sensitive), `web_target_group_arn`, `app_target_group_arn`, `app_asg_name`, `web_asg_name`, `public_nlb_dns`.
 
 - [ ] **Step 1: Test `live.tftest.hcl`** (mock `aws` + `random`, `override_data` cho remote state và AMI): plan thành công; assert `output.cloudfront_domain` khác rỗng; số `aws_autoscaling_group` == 2.
@@ -511,7 +510,7 @@ Xóa: `Java-Login-App/settings.xml`, `infrastructure/main.tf`, `infrastructure/v
 **Files:** Create `ansible/playbooks/rolling_deploy.yml`, `scripts/load-check.sh`; Modify `Makefile` (`deploy APP_VERSION=`)
 
 **Interfaces:**
-- Play 1 (`hosts: localhost`, `run_once`): `aws codeartifact describe-package-version … --package-version {{ app_version }}` — lỗi thì **dừng toàn bộ**, thông báo `version {{ app_version }} not found in CodeArtifact`.
+- Play 1 (`hosts: localhost`, `run_once`): `aws s3api head-object --bucket {{ app_artifact_bucket }} --key dptweb/{{ app_version }}/dptweb.war` — lỗi thì **dừng toàn bộ**, thông báo `version {{ app_version }} not found in S3`.
 - Play 2 (`hosts: tier_app`, `serial: 1`, `max_fail_percentage: 0`): deregister khỏi `app_target_group_arn` (`delegate_to: localhost`, id = `hostvars[inventory_hostname].instance_id`) → `aws elbv2 wait target-deregistered` → role `app_deploy` (`java3tier_services_started=true`) → `uri http://localhost:8080/actuator/health/lb` retry 30×5s → register → `aws elbv2 wait target-in-service`.
 - Play 3 (localhost): `aws ssm put-parameter --name /java3tier/app/version --overwrite --value {{ app_version }}`.
 - `scripts/load-check.sh <url> <seconds>`: gọi `GET /` mỗi 0.2s, in tổng số request và số response khác 200, exit ≠ 0 nếu có response khác 200.
@@ -520,7 +519,7 @@ Xóa: `Java-Login-App/settings.xml`, `infrastructure/main.tf`, `infrastructure/v
 - [ ] **Step 1: Push một thay đổi nhỏ** (ví dụ đổi tiêu đề trang home) → CI publish `1.0.<N+1>`.
 - [ ] **Step 2: Chạy `scripts/load-check.sh https://<cf> 300 &`** rồi `make deploy APP_VERSION=1.0.<N+1>`.
 - [ ] **Step 3: Kiểm tra** → load-check exit 0 (0 response lỗi); `scripts/smoke.sh https://<cf> 1.0.<N+1>` PASS cả 8 kiểm tra.
-- [ ] **Step 4: Version không tồn tại**: `make deploy APP_VERSION=9.9.9` → Expected: fail với `version 9.9.9 not found in CodeArtifact`; `aws elbv2 describe-target-health --target-group-arn <app_tg>` vẫn 2 `healthy` (Review Focus 3).
+- [ ] **Step 4: Version không tồn tại**: `make deploy APP_VERSION=9.9.9` → Expected: fail với `version 9.9.9 not found in S3`; `aws elbv2 describe-target-health --target-group-arn <app_tg>` vẫn 2 `healthy` (Review Focus 3).
 - [ ] **Step 5: Commit** `feat(ansible): zero-downtime rolling deploy`
 
 ### Task 24: Tự phục hồi, tài liệu, runbook quay video
