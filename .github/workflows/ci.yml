@@ -1,0 +1,96 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: Java-Login-App
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # SonarCloud blame data
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+          cache: maven
+
+      - name: Build and test
+        run: mvn -B verify
+
+      # The SonarCloud scanner itself needs Java 17; the code is still analysed as Java 11.
+      - uses: actions/setup-java@v4
+        if: env.SONAR_TOKEN != ''
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: SonarCloud scan
+        if: env.SONAR_TOKEN != ''
+        run: >-
+          mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar
+          -Dsonar.organization=${{ vars.SONAR_ORG }}
+          -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+          -Dsonar.host.url=https://sonarcloud.io
+          -Dsonar.java.source=11
+
+  publish:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      CA_ARGS: >-
+        --domain ${{ vars.CODEARTIFACT_DOMAIN }}
+        --domain-owner ${{ vars.CODEARTIFACT_DOMAIN_OWNER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+          cache: maven
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: CodeArtifact token and endpoint
+        id: ca
+        run: |
+          # shellcheck disable=SC2086
+          token=$(aws codeartifact get-authorization-token $CA_ARGS --query authorizationToken --output text)
+          echo "::add-mask::$token"
+          echo "CODEARTIFACT_AUTH_TOKEN=$token" >> "$GITHUB_ENV"
+          # shellcheck disable=SC2086
+          endpoint=$(aws codeartifact get-repository-endpoint $CA_ARGS \
+            --repository ${{ vars.CODEARTIFACT_REPO }} --format maven \
+            --query repositoryEndpoint --output text)
+          echo "endpoint=$endpoint" >> "$GITHUB_OUTPUT"
+
+      - name: Set version
+        run: >-
+          mvn -B org.codehaus.mojo:versions-maven-plugin:2.18.0:set
+          -DnewVersion=1.0.${{ github.run_number }} -DgenerateBackupPoms=false
+
+      - name: Publish WAR
+        run: >-
+          mvn -B -s ci-settings.xml deploy -DskipTests
+          -DaltDeploymentRepository=codeartifact::default::${{ steps.ca.outputs.endpoint }}
